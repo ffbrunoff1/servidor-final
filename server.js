@@ -141,11 +141,12 @@ const detectProjectType = (files) => {
 
 const installDependencies = async (projectDir) => {
   try {
-    // Tentar pnpm primeiro
+    // Tentar pnpm primeiro (SEM --no-optional para permitir dependências do esbuild)
     await runCommand('pnpm', ['install'], projectDir);
   } catch (error) {
     logger.warn('pnpm install falhou, tentando npm install...', { projectDir, error: error.message });
     try {
+      // Tentar npm (SEM --no-optional para permitir dependências do esbuild)
       await runCommand('npm', ['install'], projectDir);
     } catch (npmError) {
       logger.error('npm install também falhou', { projectDir, error: npmError.message });
@@ -167,18 +168,18 @@ const runBuild = async (projectDir, previewId, projectType) => {
       configPath = viteConfigPath;
       originalConfigContent = await fs.readFile(viteConfigPath, 'utf-8');
       
-      // Injetar base URL no vite.config.js
+      // Injetar base URL no vite.config.js (SEM /dist/ no final)
       let newConfigContent = originalConfigContent;
       if (newConfigContent.includes('defineConfig({')) {
         newConfigContent = newConfigContent.replace(
           /defineConfig\(\{/,
-          `defineConfig({\n  base: '/preview/${previewId}/dist/',`
+          `defineConfig({\n  base: '/preview/${previewId}/',`
         );
       } else {
         // Se não encontrar defineConfig, adicionar base no final do objeto
         newConfigContent = newConfigContent.replace(
           /export default \{/,
-          `export default {\n  base: '/preview/${previewId}/dist/',`
+          `export default {\n  base: '/preview/${previewId}/',`
         );
       }
       
@@ -189,10 +190,10 @@ const runBuild = async (projectDir, previewId, projectType) => {
       configPath = astroConfigPath;
       originalConfigContent = await fs.readFile(astroConfigPath, 'utf-8');
       
-      // Injetar base URL no astro.config.mjs
+      // Injetar base URL no astro.config.mjs (SEM /dist/ no final)
       const newConfigContent = originalConfigContent.replace(
         /defineConfig\(\{/,
-        `defineConfig({\n  base: '/preview/${previewId}/dist/',`
+        `defineConfig({\n  base: '/preview/${previewId}/',`
       );
       
       await fs.writeFile(astroConfigPath, newConfigContent);
@@ -203,219 +204,219 @@ const runBuild = async (projectDir, previewId, projectType) => {
     try {
       await runCommand('pnpm', ['run', 'build'], projectDir);
     } catch (error) {
-      logger.warn('pnpm run build falhou, tentando npm run build...', { projectDir, error: error.message });
+      logger.warn('pnpm run build falhou, tentando npm run build...', { error: error.message, projectDir });
       await runCommand('npm', ['run', 'build'], projectDir);
     }
-    
+
   } finally {
     // Restaurar arquivo de configuração original
-    if (originalConfigContent && configPath) {
-      try {
-        await fs.writeFile(configPath, originalConfigContent);
-        logger.info('Arquivo de configuração restaurado', { projectDir });
-      } catch (error) {
-        logger.warn('Erro ao restaurar arquivo de configuração', { error: error.message });
-      }
+    if (configPath && originalConfigContent) {
+      await fs.writeFile(configPath, originalConfigContent);
+      logger.info('Arquivo de configuração restaurado', { projectDir });
     }
   }
 };
 
+// Middleware para servir arquivos estáticos de preview com fallback para SPA
+const servePreviewFiles = (req, res, next) => {
+  const previewMatch = req.path.match(/^\/preview\/([^\/]+)\/(.*)$/);
+  
+  if (previewMatch) {
+    const [, previewId, filePath] = previewMatch;
+    const projectDir = path.join(config.previewsDir, previewId);
+    const distDir = path.join(projectDir, 'dist');
+    
+    // Primeiro, tentar servir da pasta dist
+    const distFilePath = path.join(distDir, filePath || 'index.html');
+    
+    fs.access(distFilePath)
+      .then(() => {
+        res.sendFile(distFilePath);
+      })
+      .catch(() => {
+        // Se não encontrar na pasta dist, tentar na raiz do projeto
+        const rootFilePath = path.join(projectDir, filePath || 'index.html');
+        
+        fs.access(rootFilePath)
+          .then(() => {
+            res.sendFile(rootFilePath);
+          })
+          .catch(() => {
+            // Se ainda não encontrar e for uma SPA, servir index.html
+            const indexPath = path.join(distDir, 'index.html');
+            
+            fs.access(indexPath)
+              .then(() => {
+                res.sendFile(indexPath);
+              })
+              .catch(() => {
+                // Último recurso: tentar index.html na raiz
+                const rootIndexPath = path.join(projectDir, 'index.html');
+                
+                fs.access(rootIndexPath)
+                  .then(() => {
+                    res.sendFile(rootIndexPath);
+                  })
+                  .catch(() => {
+                    res.status(404).json({ error: 'Preview não encontrado' });
+                  });
+              });
+          });
+      });
+  } else {
+    next();
+  }
+};
+
+// Aplicar middleware de preview
+app.use(servePreviewFiles);
+
 // Rotas
 app.get('/', (req, res) => {
   res.json({ 
-    message: '🚀 Servidor de preview funcionando!',
-    version: '1.0.0',
-    endpoints: {
-      build: 'POST /build',
-      health: 'GET /health',
-      preview: 'GET /preview/:id/dist/'
-    }
+    message: '🚀 Servidor de preview React/Vite funcionando corretamente.',
+    timestamp: new Date().toISOString(),
+    version: '2.0.0'
   });
 });
 
-app.get('/health', async (req, res) => {
-  try {
-    const stats = {
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      uptime: Math.round(process.uptime()),
-      memory: process.memoryUsage(),
-      version: '1.0.0'
-    };
-    
-    res.json(stats);
-  } catch (error) {
-    logger.error('Erro no health check', { error: error.message });
-    res.status(500).json({ status: 'unhealthy', error: error.message });
-  }
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    environment: config.nodeEnv
+  });
 });
 
 app.post('/build', async (req, res) => {
   const startTime = Date.now();
-  let projectDir = null;
-  
+  logger.info('Requisição de build recebida', { timestamp: new Date().toISOString() });
+
   try {
-    logger.info('Requisição de build recebida');
-    
     // Validar payload
     const { error, value } = buildPayloadSchema.validate(req.body);
     if (error) {
-      return res.status(400).json({ 
-        error: 'Payload inválido', 
-        details: error.details.map(d => d.message) 
-      });
+      return res.status(400).json({ error: 'Payload inválido', details: error.details });
     }
-    
+
     const { files } = value;
     const id = nanoid();
-    projectDir = path.join(config.previewsDir, id);
-    
-    logger.info('Criando projeto de preview', { id, fileCount: Object.keys(files).length });
-    
-    // Criar estrutura de arquivos
+    const projectDir = path.join(config.previewsDir, id);
+
+    logger.info('Criando projeto de preview', { 
+      fileCount: Object.keys(files).length, 
+      id,
+      timestamp: new Date().toISOString()
+    });
+
+    // Criar arquivos do projeto
     await Promise.all(
       Object.entries(files).map(async ([filePath, content]) => {
+        const fileContent = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
         const fullPath = path.join(projectDir, filePath);
         await fs.mkdir(path.dirname(fullPath), { recursive: true });
-        await fs.writeFile(fullPath, content);
+        await fs.writeFile(fullPath, fileContent);
       })
     );
-    
+
     // Detectar tipo de projeto
     const projectType = detectProjectType(files);
-    logger.info('Tipo de projeto detectado', { projectType, id });
-    
-    // Instalar dependências
+    logger.info('Tipo de projeto detectado', { 
+      id, 
+      projectType,
+      timestamp: new Date().toISOString()
+    });
+
+    // Instalar dependências e fazer build
     await installDependencies(projectDir);
-    
-    // Executar build
     await runBuild(projectDir, id, projectType);
-    
-    // Verificar se o build foi criado
-    const distDir = path.join(projectDir, 'dist');
-    const buildExists = await fs.access(distDir).then(() => true).catch(() => false);
-    
-    if (!buildExists) {
-      throw new Error('Build não foi gerado na pasta dist');
-    }
-    
+
     const buildTime = Date.now() - startTime;
-    const previewUrl = `${req.protocol}://${req.get('host')}/preview/${id}/dist/`;
+    const previewUrl = `https://${req.headers.host}/preview/${id}/`;
     
     logger.info('Preview criado com sucesso', { 
+      buildTime: `${buildTime}ms`, 
       id, 
-      projectType, 
+      previewUrl,
+      projectType,
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({ 
+      url: previewUrl,
+      id,
+      projectType,
       buildTime: `${buildTime}ms`,
-      previewUrl 
+      timestamp: new Date().toISOString()
     });
-    
-    res.json({
-      success: true,
-      data: {
-        projectId: id,
-        url: previewUrl,
-        projectType,
-        buildTime,
-        fileCount: Object.keys(files).length
-      }
-    });
-    
+
   } catch (error) {
+    const buildTime = Date.now() - startTime;
     logger.error('Erro ao gerar preview', { 
       error: error.message, 
       stack: error.stack,
-      projectDir 
+      buildTime: `${buildTime}ms`,
+      timestamp: new Date().toISOString()
     });
     
-    // Limpar diretório em caso de erro
-    if (projectDir) {
-      try {
-        await fs.rm(projectDir, { recursive: true, force: true });
-      } catch (cleanupError) {
-        logger.warn('Erro ao limpar diretório após falha', { cleanupError: cleanupError.message });
-      }
-    }
-    
-    res.status(500).json({
-      error: 'Erro no build',
+    res.status(500).json({ 
+      error: 'Erro no build', 
       message: error.message,
-      buildTime: Date.now() - startTime
+      buildTime: `${buildTime}ms`,
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// Servir arquivos estáticos dos previews
-app.use('/preview/:id/dist', express.static(config.previewsDir, {
-  setHeaders: (res, filePath) => {
-    // Extrair ID do preview da URL
-    const urlParts = res.req.url.split('/');
-    const previewId = urlParts[2]; // /preview/:id/dist/...
-    
-    // Construir caminho correto para o arquivo
-    const relativePath = urlParts.slice(4).join('/'); // Remover /preview/:id/dist/
-    const actualPath = path.join(config.previewsDir, previewId, 'dist', relativePath);
-    
-    // Definir headers apropriados
-    if (filePath.endsWith('.html')) {
-      res.setHeader('Content-Type', 'text/html');
-    } else if (filePath.endsWith('.js')) {
-      res.setHeader('Content-Type', 'application/javascript');
-    } else if (filePath.endsWith('.css')) {
-      res.setHeader('Content-Type', 'text/css');
-    }
-    
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-  }
-}));
-
 // Middleware de tratamento de erros
 app.use((error, req, res, next) => {
-  logger.error('Erro não tratado', { 
-    error: error.message, 
+  logger.error('Erro não tratado', {
+    error: error.message,
     stack: error.stack,
+    method: req.method,
     url: req.url,
-    method: req.method 
+    timestamp: new Date().toISOString()
   });
-  
+
   res.status(500).json({
     error: 'Erro interno do servidor',
-    message: config.nodeEnv === 'development' ? error.message : 'Algo deu errado'
+    timestamp: new Date().toISOString()
   });
 });
 
 // Limpeza automática de previews antigos
 const cleanupOldPreviews = async () => {
   try {
-    const entries = await fs.readdir(config.previewsDir, { withFileTypes: true });
+    const previews = await fs.readdir(config.previewsDir);
     const now = Date.now();
-    
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const dirPath = path.join(config.previewsDir, entry.name);
-        const stats = await fs.stat(dirPath);
-        const age = now - stats.mtime.getTime();
-        
-        if (age > config.previewMaxAgeMs) {
-          await fs.rm(dirPath, { recursive: true, force: true });
-          logger.info('Preview antigo removido', { id: entry.name, age: `${Math.round(age / 1000 / 60)}min` });
-        }
+
+    for (const previewId of previews) {
+      const previewPath = path.join(config.previewsDir, previewId);
+      const stats = await fs.stat(previewPath);
+      
+      if (now - stats.mtime.getTime() > config.previewMaxAgeMs) {
+        await fs.rm(previewPath, { recursive: true, force: true });
+        logger.info('Preview antigo removido', { previewId });
       }
     }
   } catch (error) {
-    logger.warn('Erro na limpeza automática', { error: error.message });
+    logger.error('Erro na limpeza de previews', { error: error.message });
   }
 };
 
-// Iniciar limpeza automática
+// Executar limpeza periodicamente
 setInterval(cleanupOldPreviews, config.cleanupIntervalMs);
 
 // Iniciar servidor
 app.listen(config.port, config.host, () => {
-  logger.info('🚀 Servidor iniciado', {
+  logger.info('Servidor iniciado', {
     port: config.port,
     host: config.host,
     nodeEnv: config.nodeEnv,
-    previewsDir: config.previewsDir
+    packageManager: 'pnpm/npm (auto-fallback)',
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -429,4 +430,3 @@ process.on('SIGINT', () => {
   logger.info('Recebido SIGINT, encerrando servidor...');
   process.exit(0);
 });
-
