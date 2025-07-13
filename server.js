@@ -56,10 +56,11 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: '*',
+  origin: ['https://lovable.dev', 'http://localhost:3000', 'http://localhost:5173'],
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+} ));
 
 // Rate limiting
 const limiter = rateLimit({
