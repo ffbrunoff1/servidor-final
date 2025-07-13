@@ -56,11 +56,24 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: ['https://lovable.dev', 'http://localhost:3000', 'http://localhost:5173'],
+  origin: function (origin, callback ) {
+    // Permitir requisições sem origin (ex: Postman, apps mobile)
+    if (!origin) return callback(null, true);
+    
+    // Permitir domínios do Lovable
+    if (origin.includes('lovableproject.com') || 
+        origin.includes('lovable.dev') ||
+        origin.includes('localhost')) {
+      return callback(null, true);
+    }
+    
+    // Bloquear outros domínios
+    callback(new Error('Not allowed by CORS'));
+  },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
-} ));
+}));
 
 // Rate limiting
 const limiter = rateLimit({
