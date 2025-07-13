@@ -190,7 +190,7 @@ const runBuild = async (projectDir, previewId, projectType) => {
   }
 };
 
-// Função para corrigir caminhos no HTML
+// Função para corrigir caminhos APENAS no HTML
 const fixHtmlPaths = async (htmlPath, previewId) => {
   try {
     let htmlContent = await fs.readFile(htmlPath, 'utf-8');
@@ -220,7 +220,12 @@ const fixHtmlPaths = async (htmlPath, previewId) => {
   }
 };
 
-// Middleware inteligente para servir arquivos de preview
+// Função para verificar se é arquivo HTML
+const isHtmlFile = (filePath) => {
+  return filePath.endsWith('.html') || filePath === '' || !filePath.includes('.');
+};
+
+// Middleware inteligente para servir arquivos de preview - CORRIGIDO
 const servePreviewFiles = async (req, res, next) => {
   const previewMatch = req.path.match(/^\/preview\/([^\/]+)\/(.*)$/);
   
@@ -232,6 +237,8 @@ const servePreviewFiles = async (req, res, next) => {
     // Se não especificar arquivo, servir index.html
     const requestedFile = filePath || 'index.html';
     
+    logger.info('Servindo arquivo de preview', { previewId, requestedFile });
+    
     try {
       // Primeiro, tentar servir da pasta dist
       const distFilePath = path.join(distDir, requestedFile);
@@ -239,8 +246,8 @@ const servePreviewFiles = async (req, res, next) => {
       try {
         await fs.access(distFilePath);
         
-        // Se for index.html, corrigir caminhos antes de servir
-        if (requestedFile === 'index.html') {
+        // CORREÇÃO: Aplicar fixHtmlPaths APENAS para arquivos HTML
+        if (isHtmlFile(requestedFile)) {
           await fixHtmlPaths(distFilePath, previewId);
         }
         
@@ -252,14 +259,14 @@ const servePreviewFiles = async (req, res, next) => {
         try {
           await fs.access(rootFilePath);
           
-          // Se for index.html, corrigir caminhos antes de servir
-          if (requestedFile === 'index.html') {
+          // CORREÇÃO: Aplicar fixHtmlPaths APENAS para arquivos HTML
+          if (isHtmlFile(requestedFile)) {
             await fixHtmlPaths(rootFilePath, previewId);
           }
           
           return res.sendFile(rootFilePath);
         } catch {
-          // Para SPAs, sempre servir index.html para rotas não encontradas
+          // Para SPAs, sempre servir index.html para rotas não encontradas (APENAS se não for arquivo específico)
           if (!requestedFile.includes('.')) {
             const indexPath = path.join(distDir, 'index.html');
             
@@ -279,6 +286,8 @@ const servePreviewFiles = async (req, res, next) => {
               }
             }
           } else {
+            // CORREÇÃO: Para arquivos específicos (JS, CSS, etc), retornar 404 sem tentar HTML
+            logger.warn('Arquivo não encontrado', { previewId, requestedFile });
             return res.status(404).json({ error: 'Arquivo não encontrado' });
           }
         }
@@ -300,7 +309,7 @@ app.get('/', (req, res) => {
   res.json({ 
     message: '🚀 Servidor de preview React/Vite funcionando corretamente.',
     timestamp: new Date().toISOString(),
-    version: '3.0.0'
+    version: '3.1.0'
   });
 });
 
