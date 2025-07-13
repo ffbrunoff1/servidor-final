@@ -156,51 +156,11 @@ const installDependencies = async (projectDir) => {
 };
 
 const runBuild = async (projectDir, previewId, projectType) => {
-  // Modificar configuração do Vite/Astro para incluir base URL correta
-  const viteConfigPath = path.join(projectDir, 'vite.config.js');
-  const astroConfigPath = path.join(projectDir, 'astro.config.mjs');
-  
-  let originalConfigContent = null;
-  let configPath = null;
+  // NÃO modificar vite.config.js - deixar o Vite usar configuração padrão
+  // Isso evita problemas com caminhos de assets
   
   try {
-    if (await fs.access(viteConfigPath).then(() => true).catch(() => false)) {
-      configPath = viteConfigPath;
-      originalConfigContent = await fs.readFile(viteConfigPath, 'utf-8');
-      
-      // Injetar base URL no vite.config.js (SEM /dist/ no final)
-      let newConfigContent = originalConfigContent;
-      if (newConfigContent.includes('defineConfig({')) {
-        newConfigContent = newConfigContent.replace(
-          /defineConfig\(\{/,
-          `defineConfig({\n  base: '/preview/${previewId}/',`
-        );
-      } else {
-        // Se não encontrar defineConfig, adicionar base no final do objeto
-        newConfigContent = newConfigContent.replace(
-          /export default \{/,
-          `export default {\n  base: '/preview/${previewId}/',`
-        );
-      }
-      
-      await fs.writeFile(viteConfigPath, newConfigContent);
-      logger.info(`vite.config.js modificado para incluir base URL`, { projectDir, previewId });
-      
-    } else if (await fs.access(astroConfigPath).then(() => true).catch(() => false)) {
-      configPath = astroConfigPath;
-      originalConfigContent = await fs.readFile(astroConfigPath, 'utf-8');
-      
-      // Injetar base URL no astro.config.mjs (SEM /dist/ no final)
-      const newConfigContent = originalConfigContent.replace(
-        /defineConfig\(\{/,
-        `defineConfig({\n  base: '/preview/${previewId}/',`
-      );
-      
-      await fs.writeFile(astroConfigPath, newConfigContent);
-      logger.info(`astro.config.mjs modificado para incluir base URL`, { projectDir, previewId });
-    }
-
-    // Executar build
+    // Executar build sem modificar configuração
     try {
       await runCommand('pnpm', ['run', 'build'], projectDir);
     } catch (error) {
@@ -208,17 +168,46 @@ const runBuild = async (projectDir, previewId, projectType) => {
       await runCommand('npm', ['run', 'build'], projectDir);
     }
 
-  } finally {
-    // Restaurar arquivo de configuração original
-    if (configPath && originalConfigContent) {
-      await fs.writeFile(configPath, originalConfigContent);
-      logger.info('Arquivo de configuração restaurado', { projectDir });
-    }
+    logger.info('Build concluído com sucesso', { projectDir, previewId });
+
+  } catch (error) {
+    logger.error('Erro no build', { error: error.message, projectDir });
+    throw error;
   }
 };
 
-// Middleware para servir arquivos estáticos de preview com fallback para SPA
-const servePreviewFiles = (req, res, next) => {
+// Função para corrigir caminhos no HTML
+const fixHtmlPaths = async (htmlPath, previewId) => {
+  try {
+    let htmlContent = await fs.readFile(htmlPath, 'utf-8');
+    
+    // Corrigir caminhos relativos para absolutos com base no preview
+    htmlContent = htmlContent.replace(
+      /href="\/assets\//g, 
+      `href="/preview/${previewId}/assets/`
+    );
+    htmlContent = htmlContent.replace(
+      /src="\/assets\//g, 
+      `src="/preview/${previewId}/assets/`
+    );
+    htmlContent = htmlContent.replace(
+      /href="\.\/assets\//g, 
+      `href="/preview/${previewId}/assets/`
+    );
+    htmlContent = htmlContent.replace(
+      /src="\.\/assets\//g, 
+      `src="/preview/${previewId}/assets/`
+    );
+    
+    await fs.writeFile(htmlPath, htmlContent);
+    logger.info('Caminhos do HTML corrigidos', { htmlPath, previewId });
+  } catch (error) {
+    logger.warn('Erro ao corrigir caminhos do HTML', { error: error.message, htmlPath });
+  }
+};
+
+// Middleware inteligente para servir arquivos de preview
+const servePreviewFiles = async (req, res, next) => {
   const previewMatch = req.path.match(/^\/preview\/([^\/]+)\/(.*)$/);
   
   if (previewMatch) {
@@ -226,43 +215,64 @@ const servePreviewFiles = (req, res, next) => {
     const projectDir = path.join(config.previewsDir, previewId);
     const distDir = path.join(projectDir, 'dist');
     
-    // Primeiro, tentar servir da pasta dist
-    const distFilePath = path.join(distDir, filePath || 'index.html');
+    // Se não especificar arquivo, servir index.html
+    const requestedFile = filePath || 'index.html';
     
-    fs.access(distFilePath)
-      .then(() => {
-        res.sendFile(distFilePath);
-      })
-      .catch(() => {
-        // Se não encontrar na pasta dist, tentar na raiz do projeto
-        const rootFilePath = path.join(projectDir, filePath || 'index.html');
+    try {
+      // Primeiro, tentar servir da pasta dist
+      const distFilePath = path.join(distDir, requestedFile);
+      
+      try {
+        await fs.access(distFilePath);
         
-        fs.access(rootFilePath)
-          .then(() => {
-            res.sendFile(rootFilePath);
-          })
-          .catch(() => {
-            // Se ainda não encontrar e for uma SPA, servir index.html
+        // Se for index.html, corrigir caminhos antes de servir
+        if (requestedFile === 'index.html') {
+          await fixHtmlPaths(distFilePath, previewId);
+        }
+        
+        return res.sendFile(distFilePath);
+      } catch {
+        // Se não encontrar na pasta dist, tentar na raiz do projeto
+        const rootFilePath = path.join(projectDir, requestedFile);
+        
+        try {
+          await fs.access(rootFilePath);
+          
+          // Se for index.html, corrigir caminhos antes de servir
+          if (requestedFile === 'index.html') {
+            await fixHtmlPaths(rootFilePath, previewId);
+          }
+          
+          return res.sendFile(rootFilePath);
+        } catch {
+          // Para SPAs, sempre servir index.html para rotas não encontradas
+          if (!requestedFile.includes('.')) {
             const indexPath = path.join(distDir, 'index.html');
             
-            fs.access(indexPath)
-              .then(() => {
-                res.sendFile(indexPath);
-              })
-              .catch(() => {
-                // Último recurso: tentar index.html na raiz
-                const rootIndexPath = path.join(projectDir, 'index.html');
-                
-                fs.access(rootIndexPath)
-                  .then(() => {
-                    res.sendFile(rootIndexPath);
-                  })
-                  .catch(() => {
-                    res.status(404).json({ error: 'Preview não encontrado' });
-                  });
-              });
-          });
-      });
+            try {
+              await fs.access(indexPath);
+              await fixHtmlPaths(indexPath, previewId);
+              return res.sendFile(indexPath);
+            } catch {
+              const rootIndexPath = path.join(projectDir, 'index.html');
+              
+              try {
+                await fs.access(rootIndexPath);
+                await fixHtmlPaths(rootIndexPath, previewId);
+                return res.sendFile(rootIndexPath);
+              } catch {
+                return res.status(404).json({ error: 'Preview não encontrado' });
+              }
+            }
+          } else {
+            return res.status(404).json({ error: 'Arquivo não encontrado' });
+          }
+        }
+      }
+    } catch (error) {
+      logger.error('Erro ao servir arquivo de preview', { error: error.message, previewId, filePath });
+      return res.status(500).json({ error: 'Erro interno do servidor' });
+    }
   } else {
     next();
   }
@@ -276,7 +286,7 @@ app.get('/', (req, res) => {
   res.json({ 
     message: '🚀 Servidor de preview React/Vite funcionando corretamente.',
     timestamp: new Date().toISOString(),
-    version: '2.0.0'
+    version: '3.0.0'
   });
 });
 
