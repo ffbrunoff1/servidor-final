@@ -142,11 +142,11 @@ const detectProjectType = (files) => {
 const installDependencies = async (projectDir) => {
   try {
     // Tentar pnpm primeiro
-    await runCommand('pnpm', ['install', '--no-optional'], projectDir);
+    await runCommand('pnpm', ['install'], projectDir);
   } catch (error) {
     logger.warn('pnpm install falhou, tentando npm install...', { projectDir, error: error.message });
     try {
-      await runCommand('npm', ['install', '--no-optional'], projectDir);
+      await runCommand('npm', ['install'], projectDir);
     } catch (npmError) {
       logger.error('npm install também falhou', { projectDir, error: npmError.message });
       throw npmError;
