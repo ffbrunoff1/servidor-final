@@ -57,7 +57,7 @@ app.use(helmet({
 
 app.use(cors({
   origin: function (origin, callback ) {
-    // Permitir requisições sem origin (ex: Postman, apps mobile)
+    // Permitir requisições sem origin (ex: Postman, apps mobile, acesso direto)
     if (!origin) return callback(null, true);
     
     // Permitir domínios do Lovable
@@ -66,6 +66,12 @@ app.use(cors({
         origin.includes('localhost')) {
       return callback(null, true);
     }
+    
+    // CORREÇÃO: Permitir outros domínios também (para acesso direto)
+    return callback(null, true);
+  },
+  // resto igual...
+}));
     
     // Bloquear outros domínios
     callback(new Error('Not allowed by CORS'));
