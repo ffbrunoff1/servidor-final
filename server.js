@@ -54,10 +54,17 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Middleware de segurança
-app.use(helmet({
-  contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false
-}));
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        "frame-ancestors": ["'self'", "https://lovable.dev"], // Permite iframes do lovable.dev
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  } )
+);
 
 app.use(cors({
   origin: true, // Reflete a origem da requisição, uma forma segura de permitir múltiplas origens
