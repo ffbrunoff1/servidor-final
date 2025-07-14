@@ -53,23 +53,22 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Middleware de segurança
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-        "frame-ancestors": ["'self'", "https://lovable.dev"], // Permite iframes do lovable.dev
-      },
-    },
-    crossOriginEmbedderPolicy: false,
-  } )
-);
-
+// Configuração de CORS simples e permissiva que funciona
 app.use(cors({
-  origin: true, // Reflete a origem da requisição, uma forma segura de permitir múltiplas origens
+  origin: true, // Permite qualquer origem, incluindo o proxy do Lovable
   credentials: true
 }));
+
+// Configuração do Helmet para remover APENAS o cabeçalho que proíbe iframes
+app.use(
+  helmet({
+    // Desativa a política que proíbe iframes
+    frameguard: false,
+    // Mantém a política de segurança de conteúdo desativada como antes
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false
+  })
+);
 
 // Rate limiting
 const limiter = rateLimit({
