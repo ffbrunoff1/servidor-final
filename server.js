@@ -56,23 +56,9 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: function (origin, callback) {  // ← Sem espaço extra
-    // Permitir requisições sem origin
-    if (!origin) return callback(null, true);
-    
-    // Permitir domínios do Lovable
-    if (origin.includes('lovableproject.com') || 
-        origin.includes('lovable.dev') ||
-        origin.includes('localhost')) {
-      return callback(null, true);
-    }
-    
-    // Permitir outros domínios também
-    return callback(null, true);
-  },
+  origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
     
     // Bloquear outros domínios
