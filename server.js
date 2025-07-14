@@ -60,14 +60,6 @@ app.use(cors({
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-    
-    // Bloquear outros domínios
-    callback(new Error('Not allowed by CORS'));
-  },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -184,7 +176,7 @@ const runBuild = async (projectDir, previewId, projectType) => {
   }
 };
 
-// Função para corrigir caminhos APENAS no HTML
+// Função para corrigir caminhos no HTML
 const fixHtmlPaths = async (htmlPath, previewId) => {
   try {
     let htmlContent = await fs.readFile(htmlPath, 'utf-8');
@@ -214,12 +206,7 @@ const fixHtmlPaths = async (htmlPath, previewId) => {
   }
 };
 
-// Função para verificar se é arquivo HTML
-const isHtmlFile = (filePath) => {
-  return filePath.endsWith('.html') || filePath === '' || !filePath.includes('.');
-};
-
-// Middleware inteligente para servir arquivos de preview - CORRIGIDO
+// Middleware inteligente para servir arquivos de preview
 const servePreviewFiles = async (req, res, next) => {
   const previewMatch = req.path.match(/^\/preview\/([^\/]+)\/(.*)$/);
   
@@ -231,8 +218,6 @@ const servePreviewFiles = async (req, res, next) => {
     // Se não especificar arquivo, servir index.html
     const requestedFile = filePath || 'index.html';
     
-    logger.info('Servindo arquivo de preview', { previewId, requestedFile });
-    
     try {
       // Primeiro, tentar servir da pasta dist
       const distFilePath = path.join(distDir, requestedFile);
@@ -240,8 +225,8 @@ const servePreviewFiles = async (req, res, next) => {
       try {
         await fs.access(distFilePath);
         
-        // CORREÇÃO: Aplicar fixHtmlPaths APENAS para arquivos HTML
-        if (isHtmlFile(requestedFile)) {
+        // Se for index.html, corrigir caminhos antes de servir
+        if (requestedFile === 'index.html') {
           await fixHtmlPaths(distFilePath, previewId);
         }
         
@@ -253,14 +238,14 @@ const servePreviewFiles = async (req, res, next) => {
         try {
           await fs.access(rootFilePath);
           
-          // CORREÇÃO: Aplicar fixHtmlPaths APENAS para arquivos HTML
-          if (isHtmlFile(requestedFile)) {
+          // Se for index.html, corrigir caminhos antes de servir
+          if (requestedFile === 'index.html') {
             await fixHtmlPaths(rootFilePath, previewId);
           }
           
           return res.sendFile(rootFilePath);
         } catch {
-          // Para SPAs, sempre servir index.html para rotas não encontradas (APENAS se não for arquivo específico)
+          // Para SPAs, sempre servir index.html para rotas não encontradas
           if (!requestedFile.includes('.')) {
             const indexPath = path.join(distDir, 'index.html');
             
@@ -280,8 +265,6 @@ const servePreviewFiles = async (req, res, next) => {
               }
             }
           } else {
-            // CORREÇÃO: Para arquivos específicos (JS, CSS, etc), retornar 404 sem tentar HTML
-            logger.warn('Arquivo não encontrado', { previewId, requestedFile });
             return res.status(404).json({ error: 'Arquivo não encontrado' });
           }
         }
@@ -303,7 +286,7 @@ app.get('/', (req, res) => {
   res.json({ 
     message: '🚀 Servidor de preview React/Vite funcionando corretamente.',
     timestamp: new Date().toISOString(),
-    version: '3.1.0'
+    version: '3.0.0'
   });
 });
 
