@@ -55,32 +55,8 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-const allowedOrigins = [
-  'https://lovable.dev',
-  'http://localhost:3000',
-  'http://localhost:5173'
-];
-
 app.use(cors({
-  origin: function (origin, callback ) {
-    // Permitir requisições sem 'origin' (como curl, Postman)
-    if (!origin) return callback(null, true);
-
-    // Permitir subdomínios de lovableproject.com
-    if (origin.endsWith('.lovableproject.com')) {
-      return callback(null, true);
-    }
-
-    // Permitir origens da lista 'allowedOrigins'
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    // Bloquear todas as outras origens
-    return callback(new Error('Not allowed by CORS'));
-  },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  origin: true, // Reflete a origem da requisição, uma forma segura de permitir múltiplas origens
   credentials: true
 }));
 
