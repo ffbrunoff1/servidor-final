@@ -49,6 +49,10 @@ await fs.mkdir(config.logsDir, { recursive: true });
 
 const app = express();
 
+// Aumentar o limite do corpo da requisição para aceitar JSONs grandes
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
 // Middleware de segurança
 app.use(helmet({
   contentSecurityPolicy: false,
