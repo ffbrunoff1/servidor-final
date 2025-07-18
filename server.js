@@ -1,4 +1,3 @@
-import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -49,7 +48,7 @@ await fs.mkdir(config.logsDir, { recursive: true });
 
 const app = express();
 
-app.set('trust proxy', true);
+app.set('trust proxy', 1);
 
 // Aumentar o limite do corpo da requisição para aceitar JSONs grandes
 app.use(express.json({ limit: '50mb' }));
