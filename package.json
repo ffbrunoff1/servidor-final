@@ -15,8 +15,7 @@
     "express-rate-limit": "^6.8.1",
     "joi": "^17.9.2",
     "winston": "^3.10.0",
-    "nanoid": "^4.0.2",
-    "archiver": "^6.0.1"
+    "nanoid": "^4.0.2"
   },
   "engines": {
     "node": ">=18.0.0"
