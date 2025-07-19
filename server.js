@@ -64,7 +64,8 @@ app.use(cors({
 // Configuração básica de segurança
 app.use(helmet({
   contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false
+  crossOriginEmbedderPolicy: false,
+  frameguard: false  // ← ADICIONE ESTA LINHA
 }));
 
 // Rate limiting
