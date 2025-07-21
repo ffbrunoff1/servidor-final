@@ -217,75 +217,52 @@ const fixHtmlPaths = async (htmlPath, previewId) => {
   }
 };
 
-// Middleware inteligente para servir arquivos de preview
+// Middleware inteligente para servir arquivos de preview (VERSÃO MELHORADA)
 const servePreviewFiles = async (req, res, next) => {
-  const previewMatch = req.path.match(/^\/preview\/([^\/]+)\/(.*)$/);
-  
-  if (previewMatch) {
-    const [, previewId, filePath] = previewMatch;
-    const projectDir = path.join(config.previewsDir, previewId);
+  const previewMatch = req.path.match(/^\/preview\/([^\/]+)/);
+
+  if (!previewMatch) {
+    return next(); // Não é uma rota de preview, continua para o próximo middleware
+  }
+
+  const [, previewId] = previewMatch;
+  const projectDir = path.join(config.previewsDir, previewId);
+
+  try {
+    // --- PASSO 1: VERIFICAÇÃO DE EXISTÊNCIA (A MUDANÇA CRUCIAL) ---
+    // Verifica se o diretório do preview existe. Se não, lança um erro.
+    await fs.access(projectDir);
+
+    // --- PASSO 2: SERVIR ARQUIVOS ESTÁTICOS ---
+    // Se o diretório existe, deixe o `express.static` fazer o trabalho pesado.
+    // Ele é otimizado para servir arquivos e lida com tipos de conteúdo, cache, etc.
+    // Ele também lida com o caso de servir 'index.html' para sub-rotas de SPA.
     const distDir = path.join(projectDir, 'dist');
     
-    // Se não especificar arquivo, servir index.html
-    const requestedFile = filePath || 'index.html';
-    
-    try {
-      // Primeiro, tentar servir da pasta dist
-      const distFilePath = path.join(distDir, requestedFile);
-      
-      try {
-        await fs.access(distFilePath);
-        
-        // Se for index.html, corrigir caminhos antes de servir
-        if (requestedFile === 'index.html') {
-          await fixHtmlPaths(distFilePath, previewId);
+    // Opção para servir o index.html em rotas de SPA (Single Page Application)
+    const staticOptions = {
+      fallthrough: true, // Passa para o próximo handler se o arquivo não for encontrado
+      index: 'index.html' // Nome do arquivo principal
+    };
+
+    express.static(distDir, staticOptions)(req, res, (err) => {
+        // Se o express.static não encontrar o arquivo (ex: /assets/logo.png),
+        // ele pode passar para o próximo middleware ou você pode tratar aqui.
+        // Para a maioria dos casos, o comportamento padrão é suficiente.
+        // Se chegarmos aqui, significa que o arquivo específico não foi encontrado na pasta dist.
+        // Podemos então retornar um 404 para esse arquivo específico.
+        if (!res.headersSent) {
+            res.status(404).json({ error: 'Arquivo não encontrado dentro do preview.' });
         }
-        
-        return res.sendFile(distFilePath);
-      } catch {
-        // Se não encontrar na pasta dist, tentar na raiz do projeto
-        const rootFilePath = path.join(projectDir, requestedFile);
-        
-        try {
-          await fs.access(rootFilePath);
-          
-          // Se for index.html, corrigir caminhos antes de servir
-          if (requestedFile === 'index.html') {
-            await fixHtmlPaths(rootFilePath, previewId);
-          }
-          
-          return res.sendFile(rootFilePath);
-        } catch {
-          // Para SPAs, sempre servir index.html para rotas não encontradas
-          if (!requestedFile.includes('.')) {
-            const indexPath = path.join(distDir, 'index.html');
-            
-            try {
-              await fs.access(indexPath);
-              await fixHtmlPaths(indexPath, previewId);
-              return res.sendFile(indexPath);
-            } catch {
-              const rootIndexPath = path.join(projectDir, 'index.html');
-              
-              try {
-                await fs.access(rootIndexPath);
-                await fixHtmlPaths(rootIndexPath, previewId);
-                return res.sendFile(rootIndexPath);
-              } catch {
-                return res.status(404).json({ error: 'Preview não encontrado' });
-              }
-            }
-          } else {
-            return res.status(404).json({ error: 'Arquivo não encontrado' });
-          }
-        }
-      }
-    } catch (error) {
-      logger.error('Erro ao servir arquivo de preview', { error: error.message, previewId, filePath });
-      return res.status(500).json({ error: 'Erro interno do servidor' });
-    }
-  } else {
-    next();
+    });
+
+  } catch (error) {
+    // --- PASSO 3: LIDAR COM PREVIEW INEXISTENTE ---
+    // O erro do `fs.access` será capturado aqui.
+    // Isso significa que a pasta do preview foi limpa ou nunca existiu.
+    // Retornamos um 404 claro, que o Lovable poderá detectar.
+    logger.warn('Tentativa de acesso a preview inexistente', { previewId, path: req.path });
+    return res.status(404).json({ error: 'Preview não encontrado ou expirado.' });
   }
 };
 
