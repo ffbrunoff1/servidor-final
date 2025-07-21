@@ -217,50 +217,64 @@ const fixHtmlPaths = async (htmlPath, previewId) => {
   }
 };
 
-// Middleware inteligente para servir arquivos de preview (VERSÃO MELHORADA)
+// Middleware inteligente para servir arquivos de preview (VERSÃO CORRIGIDA E SEGURA)
 const servePreviewFiles = async (req, res, next) => {
+  // Usamos uma regex mais simples para apenas extrair o ID do preview.
   const previewMatch = req.path.match(/^\/preview\/([^\/]+)/);
 
   if (!previewMatch) {
-    return next(); // Não é uma rota de preview, continua para o próximo middleware
+    return next(); // Não é uma rota de preview, ignora.
   }
 
   const [, previewId] = previewMatch;
   const projectDir = path.join(config.previewsDir, previewId);
 
   try {
-    // --- PASSO 1: VERIFICAÇÃO DE EXISTÊNCIA (A MUDANÇA CRUCIAL) ---
-    // Verifica se o diretório do preview existe. Se não, lança um erro.
+    // --- PASSO 1: A VERIFICAÇÃO DE EXISTÊNCIA ---
+    // Esta é a única adição importante. Verificamos se a pasta do preview existe.
+    // Se não existir, o fs.access lança um erro, que é capturado pelo bloco catch abaixo.
     await fs.access(projectDir);
 
-    // --- PASSO 2: SERVIR ARQUIVOS ESTÁTICOS ---
-    // Se o diretório existe, deixe o `express.static` fazer o trabalho pesado.
-    // Ele é otimizado para servir arquivos e lida com tipos de conteúdo, cache, etc.
-    // Ele também lida com o caso de servir 'index.html' para sub-rotas de SPA.
+    // --- PASSO 2: SUA LÓGICA ORIGINAL (QUE FUNCIONA) ---
+    // Se o código chegou aqui, a pasta existe. Agora, executamos sua lógica
+    // original, que sabemos que lida corretamente com SPAs e correção de HTML.
+    const filePath = req.path.match(/^\/preview\/[^\/]+\/(.*)$/)?.[1] || '';
     const distDir = path.join(projectDir, 'dist');
-    
-    // Opção para servir o index.html em rotas de SPA (Single Page Application)
-    const staticOptions = {
-      fallthrough: true, // Passa para o próximo handler se o arquivo não for encontrado
-      index: 'index.html' // Nome do arquivo principal
-    };
+    const requestedFile = filePath || 'index.html';
 
-    express.static(distDir, staticOptions)(req, res, (err) => {
-        // Se o express.static não encontrar o arquivo (ex: /assets/logo.png),
-        // ele pode passar para o próximo middleware ou você pode tratar aqui.
-        // Para a maioria dos casos, o comportamento padrão é suficiente.
-        // Se chegarmos aqui, significa que o arquivo específico não foi encontrado na pasta dist.
-        // Podemos então retornar um 404 para esse arquivo específico.
-        if (!res.headersSent) {
-            res.status(404).json({ error: 'Arquivo não encontrado dentro do preview.' });
+    // Tentar servir da pasta dist
+    let finalPath = path.join(distDir, requestedFile);
+    try {
+      await fs.access(finalPath);
+    } catch {
+      // Se não encontrar na dist, tentar na raiz do projeto
+      finalPath = path.join(projectDir, requestedFile);
+      try {
+        await fs.access(finalPath);
+      } catch {
+        // Fallback para index.html para rotas de SPA
+        const indexPath = path.join(distDir, 'index.html');
+        try {
+          await fs.access(indexPath);
+          finalPath = indexPath;
+        } catch {
+          // Se nem o index.html da dist existir, o preview está quebrado.
+          return res.status(404).json({ error: 'Arquivo principal (index.html) não encontrado no build.' });
         }
-    });
+      }
+    }
+
+    // Se o arquivo a ser servido for o index.html, corrigir os caminhos.
+    if (path.basename(finalPath) === 'index.html') {
+      await fixHtmlPaths(finalPath, previewId);
+    }
+
+    return res.sendFile(finalPath);
 
   } catch (error) {
     // --- PASSO 3: LIDAR COM PREVIEW INEXISTENTE ---
-    // O erro do `fs.access` será capturado aqui.
-    // Isso significa que a pasta do preview foi limpa ou nunca existiu.
-    // Retornamos um 404 claro, que o Lovable poderá detectar.
+    // Este bloco catch agora captura o erro do fs.access inicial.
+    // Isso significa que a URL está "morta".
     logger.warn('Tentativa de acesso a preview inexistente', { previewId, path: req.path });
     return res.status(404).json({ error: 'Preview não encontrado ou expirado.' });
   }
